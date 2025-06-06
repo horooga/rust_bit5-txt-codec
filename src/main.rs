@@ -25,26 +25,17 @@ static ENCODES: Lazy<HashMap<char, String>> = Lazy::new(|| {
 static DECODES: Lazy<HashMap<String, char>> =
     Lazy::new(|| ENCODES.keys().map(|c| (ENCODES[c].clone(), *c)).collect());
 
-fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+fn bytes_to_base64url(bytes: &[u8]) -> String {
+    base64_url::encode(bytes)
 }
 
-fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
-    if hex.len() % 2 == 0 {
-        Some(
-            (0..hex.len())
-                .step_by(2)
-                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-                .collect(),
-        )
-    } else {
-        None
-    }
+fn base64url_to_bytes(code: &str) -> Option<Vec<u8>> {
+    base64_url::decode(code).ok()
 }
 
 fn gen_key() -> String {
     let mut rng = rng();
-    bytes_to_hex(
+    bytes_to_base64url(
         (0..16)
             .map(|_| rng.random())
             .collect::<Vec<u8>>()
@@ -53,7 +44,7 @@ fn gen_key() -> String {
 }
 
 fn decrypt(cipher: &[u8], key: String) -> Option<Vec<u8>> {
-    let byte_key = hex_to_bytes(key.as_str())?;
+    let byte_key = base64url_to_bytes(key.as_str())?;
     let ff1 = FF1::<Aes128>::new(byte_key.as_slice(), 2).unwrap();
     Some(
         ff1.decrypt(&[], &BinaryNumeralString::from_bytes_le(cipher))
@@ -63,7 +54,7 @@ fn decrypt(cipher: &[u8], key: String) -> Option<Vec<u8>> {
 }
 
 fn encrypt(bytes: &[u8], key: String) -> Option<Vec<u8>> {
-    let byte_key = hex_to_bytes(key.as_str())?;
+    let byte_key = base64url_to_bytes(key.as_str())?;
     let ff1 = FF1::<Aes128>::new(byte_key.as_slice(), 2).unwrap();
     Some(
         ff1.encrypt(&[], &BinaryNumeralString::from_bytes_le(bytes))
@@ -84,8 +75,11 @@ fn decode(bits: Vec<bool>) -> String {
 }
 
 fn encode(string: String) -> Vec<u8> {
-    let bits: Vec<bool> = string
-        .to_lowercase()
+    let mut text = string.to_lowercase();
+    if text.contains("_") {
+        text = text.replace("_", " ");
+    }
+    let bits: Vec<bool> = text
         .chars()
         .map(|c| ENCODES.get(&c).unwrap_or(&"11111".to_string()).to_owned())
         .collect::<Vec<String>>()
@@ -136,17 +130,19 @@ fn do_input(file_read: bool, input: String) -> Result<Vec<u8>, String> {
 
 fn do_decode(file_read: bool, mut bytes: Vec<u8>, key: Option<String>) -> Result<String, String> {
     if !file_read {
-        if let Some(hex) = hex_to_bytes(String::from_utf8(bytes.to_owned()).unwrap().as_str()) {
-            bytes = hex;
+        if let Some(base64_code) =
+            base64url_to_bytes(String::from_utf8(bytes.to_owned()).unwrap().as_str())
+        {
+            bytes = base64_code;
         } else {
-            return Err("Error: Hex invalid length (one missing or one extra symbol".to_string());
+            return Err("Error: Invalid key".to_string());
         }
     }
     if let Some(some_key) = key {
         if let Some(decrypted) = decrypt(bytes.as_slice(), some_key) {
             Ok(decode(bytes_to_bits(decrypted.as_slice())))
         } else {
-            Err("Error: Hex invalid length (one missing or one extra symbol".to_string())
+            Err("Error: Invalid key".to_string())
         }
     } else {
         Ok(decode(bytes_to_bits(bytes.as_slice())))
@@ -159,7 +155,7 @@ fn do_encode(text: String, key: Option<String>) -> Result<Vec<u8>, String> {
         encoded = if let Some(encrypted) = encrypt(encoded.as_slice(), key.unwrap()) {
             encrypted
         } else {
-            return Err("Error: Hex invalid length (one missing or one extra symbol".to_string());
+            return Err("Error: Invalid key".to_string());
         }
     }
     Ok(encoded)
@@ -173,7 +169,7 @@ fn do_output(file_output: bool, data: Result<Vec<u8>, String>) -> String {
                 write_file(bytes.as_slice());
                 "File saved".to_string()
             } else {
-                bytes_to_hex(bytes.as_slice())
+                bytes_to_base64url(bytes.as_slice())
             }
         }
         Err(string) => string,
@@ -181,16 +177,17 @@ fn do_output(file_output: bool, data: Result<Vec<u8>, String>) -> String {
 }
 
 fn help() {
-    println!("Usage: exe [options(as single word)] [file_path(opt) | hex_string(opt)] [hex_key(opt)]
+    println!("Usage: exe [options(as single word)] [file_path | base64url_code | input_string] [base64url_key](opt)
 
     options:
-        e - encode mode (always first option): input - existing [file_path], output - created ./encoded.bin or stdout error text
-        d - decode mode (always first option): input - existing [file_path], output - stdout decode text or stdout error text
-        ee - encode-encrypt mode (always first option): input - existing [file_path] and [hex_key], output - created ./encoded.bin or stdout error text
-        dd - decode-decrypt mode (always first option): input - existing [file_path] and [hex_key], output - stdout decode text or stdout error text
-        sw - hex string write: replaces output .bin file of a decoding operation with a [hex_string]
-        sr - hex string read: replaces input .bin or .txt [file_path] for decoding or encoding operation with a [hex_string]
-        g - 16bytes hex key gen");
+        - e - encode mode (always first option): input - existing [file_path], output - created ./encoded.bin or stdout error text
+        - d - decode mode (always first option): input - existing [file_path], output - stdout decode text or stdout error text
+        - ee - encode-encrypt mode (always first option): input - existing [file_path] and [base64url_key], output - created ./encoded.bin or stdout error text
+        - dd - decode-decrypt mode (always first option): input - existing [file_path] and [base64url_key], output - stdout decode text or stdout error text
+        - sw - string write: replaces output .bin file of a decoding operation with a [base64url_code]
+        - sr - string read: replaces input .bin or .txt [file_path] for decoding or encoding operation with a [input_string]
+        - g - 16bytes base64url key gen
+")
 }
 
 fn main() {

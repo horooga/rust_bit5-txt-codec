@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 aes = "0.8.4"
+base64-url = "3.0.0"
 fpe = "0.6.1"
 once_cell = "1.21.3"
 rand = "0.9.1"
