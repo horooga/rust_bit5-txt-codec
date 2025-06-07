@@ -9,12 +9,10 @@ use std::{
     io::{Read, Write},
 };
 
-static ALPHABET: Lazy<Vec<char>> = Lazy::new(|| {
-    "abcdefghijklmnopqrstuvwxyz,.:\n #"
-        .to_string()
-        .chars()
-        .collect()
-});
+static ALPHABET: [char; 32] = [
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
+    't', 'u', 'v', 'w', 'x', 'y', 'z', ' ', ',', '.', ':', '\n', '#',
+];
 
 static ENCODES: Lazy<HashMap<char, String>> = Lazy::new(|| {
     (0..32)
@@ -23,7 +21,7 @@ static ENCODES: Lazy<HashMap<char, String>> = Lazy::new(|| {
 });
 
 static DECODES: Lazy<HashMap<String, char>> =
-    Lazy::new(|| ENCODES.keys().map(|c| (ENCODES[c].clone(), *c)).collect());
+    Lazy::new(|| ENCODES.iter().map(|i| (i.1.clone(), *i.0)).collect());
 
 fn bytes_to_base64url(bytes: &[u8]) -> String {
     base64_url::encode(bytes)
@@ -43,18 +41,18 @@ fn gen_key() -> String {
     )
 }
 
-fn decrypt(cipher: &[u8], key: String) -> Option<Vec<u8>> {
-    let byte_key = base64url_to_bytes(key.as_str())?;
-    let ff1 = FF1::<Aes128>::new(byte_key.as_slice(), 2).unwrap();
+fn decrypt(cipher: &[u8], key: &str) -> Option<Vec<u8>> {
+    let byte_key = base64url_to_bytes(key)?;
+    let ff1 = FF1::<Aes128>::new(byte_key.as_slice(), 2).expect("key error");
     Some(
         ff1.decrypt(&[], &BinaryNumeralString::from_bytes_le(cipher))
-            .unwrap()
+            .expect("decrypt error")
             .to_bytes_le(),
     )
 }
 
-fn encrypt(bytes: &[u8], key: String) -> Option<Vec<u8>> {
-    let byte_key = base64url_to_bytes(key.as_str())?;
+fn encrypt(bytes: &[u8], key: &str) -> Option<Vec<u8>> {
+    let byte_key = base64url_to_bytes(key)?;
     let ff1 = FF1::<Aes128>::new(byte_key.as_slice(), 2).unwrap();
     Some(
         ff1.encrypt(&[], &BinaryNumeralString::from_bytes_le(bytes))
@@ -74,7 +72,7 @@ fn decode(bits: Vec<bool>) -> String {
         .collect()
 }
 
-fn encode(string: String) -> Vec<u8> {
+fn encode(string: &str) -> Vec<u8> {
     let mut text = string.to_lowercase();
     if text.contains("_") {
         text = text.replace("_", " ");
@@ -88,8 +86,8 @@ fn encode(string: String) -> Vec<u8> {
         .map(|c| c == '1')
         .collect();
     bits.chunks(8)
-        .map(|chunk| {
-            chunk.iter().enumerate().fold(
+        .map(|byte| {
+            byte.iter().enumerate().fold(
                 0_u8,
                 |acc, (i, &bit)| {
                     if bit { acc | (1 << (7 - i)) } else { acc }
@@ -114,7 +112,7 @@ fn write_file(bytes: &[u8]) {
     let _ = file.write_all(bytes);
 }
 
-fn do_input(file_read: bool, input: String) -> Result<Vec<u8>, String> {
+fn do_input(file_read: bool, input: &str) -> Result<Vec<u8>, String> {
     if file_read {
         if let Ok(mut file) = File::open(input) {
             let mut bytes = Vec::new();
@@ -124,11 +122,11 @@ fn do_input(file_read: bool, input: String) -> Result<Vec<u8>, String> {
             Err("Error: File path does not exist".to_string())
         }
     } else {
-        Ok(input.into_bytes())
+        Ok(input.to_string().into_bytes())
     }
 }
 
-fn do_decode(file_read: bool, mut bytes: Vec<u8>, key: Option<String>) -> Result<String, String> {
+fn do_decode(file_read: bool, mut bytes: Vec<u8>, key: Option<&str>) -> Result<String, String> {
     if !file_read {
         if let Some(base64_code) =
             base64url_to_bytes(String::from_utf8(bytes.to_owned()).unwrap().as_str())
@@ -149,8 +147,8 @@ fn do_decode(file_read: bool, mut bytes: Vec<u8>, key: Option<String>) -> Result
     }
 }
 
-fn do_encode(text: String, key: Option<String>) -> Result<Vec<u8>, String> {
-    let mut encoded = encode(text);
+fn do_encode(text: String, key: Option<&str>) -> Result<Vec<u8>, String> {
+    let mut encoded = encode(text.as_str());
     if key.is_some() {
         encoded = if let Some(encrypted) = encrypt(encoded.as_slice(), key.unwrap()) {
             encrypted
@@ -184,8 +182,8 @@ fn help() {
         - d - decode mode (always first option): input - existing [file_path], output - stdout decode text or stdout error text
         - ee - encode-encrypt mode (always first option): input - existing [file_path] and [base64url_key], output - created ./encoded.bin or stdout error text
         - dd - decode-decrypt mode (always first option): input - existing [file_path] and [base64url_key], output - stdout decode text or stdout error text
-        - sw - string write: replaces output .bin file of a decoding operation with a [base64url_code]
-        - sr - string read: replaces input .bin or .txt [file_path] for decoding or encoding operation with a [input_string]
+        - sw - string write: replaces output .bin file of a decoding operation with a base64url_code
+        - sr - string read: replaces input .bin or .txt [file_path] for decoding or encoding operation with a [input_string] or a [base64url_code] correspondingly
         - g - 16bytes base64url key gen
 ")
 }
@@ -199,7 +197,7 @@ fn main() {
         return;
     }
     let options = args[1].clone();
-    let input_bytes = match do_input(!options.contains("sr"), args[2].clone()) {
+    let input_bytes = match do_input(!options.contains("sr"), args[2].as_str()) {
         Ok(bytes) => bytes,
         Err(err) => {
             println!("{}", err);
@@ -207,7 +205,7 @@ fn main() {
         }
     };
     let key = if options.contains("ee") || options.contains("dd") {
-        Some(args[3].clone())
+        Some(args[3].as_str())
     } else {
         None
     };
