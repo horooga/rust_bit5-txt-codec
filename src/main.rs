@@ -2,12 +2,7 @@ use aes::Aes128;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use once_cell::sync::Lazy;
 use rand::{Rng, rng};
-use std::{
-    collections::HashMap,
-    env::args,
-    fs::File,
-    io::{Read, Write},
-};
+use std::{collections::HashMap, env::args, fs, io::Write, process::exit};
 
 static ALPHABET: [char; 32] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
@@ -108,55 +103,57 @@ fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
 }
 
 fn write_file(bytes: &[u8]) {
-    let mut file = File::create("encoded.bin").unwrap();
+    let mut file = fs::File::create("encoded.bin").unwrap();
     let _ = file.write_all(bytes);
 }
 
-fn do_input(file_read: bool, input: &str) -> Result<Vec<u8>, String> {
+fn do_input(file_read: bool, input: &str) -> Vec<u8> {
     if file_read {
-        if let Ok(mut file) = File::open(input) {
-            let mut bytes = Vec::new();
-            let _ = file.read_to_end(&mut bytes);
-            Ok(bytes)
+        if let Ok(bytes) = fs::read(input) {
+            bytes
         } else {
-            Err("Error: File path does not exist".to_string())
+            eprintln!("Error: File path does not exist");
+            exit(1);
         }
     } else {
-        Ok(input.to_string().into_bytes())
+        input.to_string().into_bytes()
     }
 }
 
-fn do_decode(file_read: bool, mut bytes: Vec<u8>, key: Option<&str>) -> Result<String, String> {
+fn do_decode(file_read: bool, mut bytes: Vec<u8>, key: Option<&str>) -> String {
     if !file_read {
         if let Some(base64_code) =
             base64url_to_bytes(String::from_utf8(bytes.to_owned()).unwrap().as_str())
         {
             bytes = base64_code;
         } else {
-            return Err("Error: Invalid key".to_string());
+            eprintln!("Error: Invalid key");
+            exit(1);
         }
     }
     if let Some(some_key) = key {
         if let Some(decrypted) = decrypt(bytes.as_slice(), some_key) {
-            Ok(decode(bytes_to_bits(decrypted.as_slice())))
+            decode(bytes_to_bits(decrypted.as_slice()))
         } else {
-            Err("Error: Invalid key".to_string())
+            eprintln!("Error: Invalid key");
+            exit(1)
         }
     } else {
-        Ok(decode(bytes_to_bits(bytes.as_slice())))
+        decode(bytes_to_bits(bytes.as_slice()))
     }
 }
 
-fn do_encode(text: String, key: Option<&str>) -> Result<Vec<u8>, String> {
+fn do_encode(text: String, key: Option<&str>) -> Vec<u8> {
     let mut encoded = encode(text.as_str());
     if key.is_some() {
         encoded = if let Some(encrypted) = encrypt(encoded.as_slice(), key.unwrap()) {
             encrypted
         } else {
-            return Err("Error: Invalid key".to_string());
+            eprintln!("Error: Invalid key");
+            exit(1);
         }
     }
-    Ok(encoded)
+    encoded
 }
 
 //using result as enum for two "Ok()" dtypes
@@ -178,13 +175,13 @@ fn help() {
     println!("Usage: exe [options(as single word)] [file_path | base64url_code | input_string] [base64url_key](opt)
 
     options:
-        - e - encode mode (always first option): input - existing [file_path], output - created ./encoded.bin or stdout error text
-        - d - decode mode (always first option): input - existing [file_path], output - stdout decode text or stdout error text
-        - ee - encode-encrypt mode (always first option): input - existing [file_path] and [base64url_key], output - created ./encoded.bin or stdout error text
-        - dd - decode-decrypt mode (always first option): input - existing [file_path] and [base64url_key], output - stdout decode text or stdout error text
-        - sw - string write: replaces output .bin file of a decoding operation with a base64url_code
+        - e - encode mode: input - existing [file_path], output - created ./encoded.bin or stderr
+        - d - decode mode: input - existing [file_path], output - stdout decode text or stderr
+        - ee - encode-encrypt mode: input - existing [file_path] and [base64url_key], output - created ./encoded.bin or stderr
+        - dd - decode-decrypt mode: input - existing [file_path] and [base64url_key], output - stdout decode text or stderr
+        - sw - string write: replaces output .bin file of a decoding operation with a base64url_code stdout
         - sr - string read: replaces input .bin or .txt [file_path] for decoding or encoding operation with a [input_string] or a [base64url_code] correspondingly
-        - g - 16bytes base64url key gen
+        - g - 16bytes base64url stdout key gen
 ")
 }
 
@@ -192,18 +189,13 @@ fn main() {
     let args: Vec<String> = args().collect();
     if args.len() == 1 {
         help();
+        return;
     } else if args[1] == "g" {
         println!("{}", gen_key());
         return;
     }
     let options = args[1].clone();
-    let input_bytes = match do_input(!options.contains("sr"), args[2].as_str()) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            println!("{}", err);
-            return;
-        }
-    };
+    let input_bytes = do_input(!options.contains("sr"), args[2].as_str());
     let key = if options.contains("ee") || options.contains("dd") {
         Some(args[3].as_str())
     } else {
@@ -211,31 +203,17 @@ fn main() {
     };
     //using result as enum for two "Ok()" dtypes
     let processed_data = if options.starts_with("e") {
-        Ok(
-            match do_encode(
-                if let Ok(text) = String::from_utf8(input_bytes) {
-                    text
-                } else {
-                    println!("Error: input file decoding error");
-                    return;
-                },
-                key,
-            ) {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    println!("{}", err);
-                    return;
-                }
-            },
-        )
-    } else {
-        Err(match do_decode(!options.contains("sr"), input_bytes, key) {
-            Ok(text) => text,
-            Err(err) => {
-                println!("{}", err);
+        Ok(do_encode(
+            if let Ok(text) = String::from_utf8(input_bytes) {
+                text
+            } else {
+                println!("Error: input file decoding error");
                 return;
-            }
-        })
+            },
+            key,
+        ))
+    } else {
+        Err(do_decode(!options.contains("sr"), input_bytes, key))
     };
     println!("{}", do_output(!options.contains("sw"), processed_data));
 }
