@@ -102,8 +102,8 @@ fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
     bits
 }
 
-fn write_file(bytes: &[u8]) {
-    let mut file = fs::File::create("encoded.bin").unwrap();
+fn write_file(bytes: &[u8], name: &str) {
+    let mut file = fs::File::create(name).unwrap();
     let _ = file.write_all(bytes);
 }
 
@@ -157,17 +157,24 @@ fn do_encode(text: String, key: Option<&str>) -> Vec<u8> {
 }
 
 //using result as enum for two "Ok()" dtypes
-fn do_output(file_output: bool, data: Result<Vec<u8>, String>) -> String {
+fn do_output(file_output: bool, data: Result<Vec<u8>, String>) -> Option<String> {
     match data {
         Ok(bytes) => {
             if file_output {
-                write_file(bytes.as_slice());
-                "File saved".to_string()
+                write_file(bytes.as_slice(), "encoded.bin");
+                None
             } else {
-                bytes_to_base64url(bytes.as_slice())
+                Some(bytes_to_base64url(bytes.as_slice()))
             }
         }
-        Err(string) => string,
+        Err(string) => {
+            if file_output {
+                write_file(string.as_bytes(), "decoded.txt");
+                None
+            } else {
+                Some(string)
+            }
+        }
     }
 }
 
@@ -176,10 +183,10 @@ fn help() {
 
     options:
         - e - encode mode: input - existing [file_path], output - created ./encoded.bin or stderr
-        - d - decode mode: input - existing [file_path], output - stdout decode text or stderr
+        - d - decode mode: input - existing [file_path], output - created ./decoded.txt or stderr
         - ee - encode-encrypt mode: input - existing [file_path] and [base64url_key], output - created ./encoded.bin or stderr
         - dd - decode-decrypt mode: input - existing [file_path] and [base64url_key], output - stdout decode text or stderr
-        - sw - string write: replaces output .bin file of a decoding operation with a base64url_code stdout
+        - sw - string write: replaces output .bin or .txt file of a encoding or decoding operation with a base64url_code stdout or a stdout string correspondingly
         - sr - string read: replaces input .bin or .txt [file_path] for decoding or encoding operation with a [input_string] or a [base64url_code] correspondingly
         - g - 16bytes base64url stdout key gen
 ")
@@ -215,5 +222,7 @@ fn main() {
     } else {
         Err(do_decode(!options.contains("sr"), input_bytes, key))
     };
-    println!("{}", do_output(!options.contains("sw"), processed_data));
+    if let Some(stdout) = do_output(!options.contains("sw"), processed_data) {
+        println!("{}", stdout);
+    }
 }
