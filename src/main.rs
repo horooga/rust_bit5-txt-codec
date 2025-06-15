@@ -1,22 +1,12 @@
 use aes::Aes128;
 use fpe::ff1::{BinaryNumeralString, FF1};
-use once_cell::sync::Lazy;
 use rand::{Rng, rng};
-use std::{collections::HashMap, env::args, fs, io::Write, process::exit};
+use std::{env::args, fs, io::Write, process::exit};
 
 static ALPHABET: [char; 32] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
     't', 'u', 'v', 'w', 'x', 'y', 'z', ' ', ',', '.', ':', '\n', '#',
 ];
-
-static ENCODES: Lazy<HashMap<char, String>> = Lazy::new(|| {
-    (0..32)
-        .map(|i| (ALPHABET[i as usize], format!("{:05b}", i)))
-        .collect()
-});
-
-static DECODES: Lazy<HashMap<String, char>> =
-    Lazy::new(|| ENCODES.iter().map(|i| (i.1.clone(), *i.0)).collect());
 
 fn bytes_to_base64url(bytes: &[u8]) -> String {
     base64_url::encode(bytes)
@@ -56,50 +46,49 @@ fn encrypt(bytes: &[u8], key: &str) -> Option<Vec<u8>> {
     )
 }
 
-fn decode(bits: Vec<bool>) -> String {
-    bits.chunks_exact(5)
-        .map(|i| {
-            DECODES[&i
-                .iter()
-                .map(|b| std::char::from_digit(if *b { 1 } else { 0 }, 10).unwrap())
-                .collect::<String>()]
-        })
-        .collect()
+fn decode(bytes: &[u8]) -> String {
+    let mut buffer: u16 = 0;
+    let mut bit_count = 0;
+    let mut output = Vec::new();
+    for &byte in bytes {
+        buffer |= (byte as u16) << bit_count;
+        bit_count += 8;
+
+        while bit_count >= 5 {
+            let val = buffer & 0x1F;
+            buffer >>= 5;
+            bit_count -= 5;
+
+            output.push(ALPHABET[val as usize]);
+        }
+    }
+    String::from_iter(output)
 }
 
 fn encode(string: &str) -> Vec<u8> {
     let mut text = string.to_lowercase();
     if text.contains("_") {
         text = text.replace("_", " ");
+        text = text.replace("@", "\n");
     }
-    let bits: Vec<bool> = text
-        .chars()
-        .map(|c| ENCODES.get(&c).unwrap_or(&"11111".to_string()).to_owned())
-        .collect::<Vec<String>>()
-        .join("")
-        .chars()
-        .map(|c| c == '1')
-        .collect();
-    bits.chunks(8)
-        .map(|byte| {
-            byte.iter().enumerate().fold(
-                0_u8,
-                |acc, (i, &bit)| {
-                    if bit { acc | (1 << (7 - i)) } else { acc }
-                },
-            )
-        })
-        .collect()
-}
+    let mut buffer: u16 = 0;
+    let mut bit_count = 0;
+    let mut output = Vec::new();
+    for c in text.chars() {
+        let val = ALPHABET.iter().position(|&i| i == c).expect("#") as u16;
+        buffer |= val << bit_count;
+        bit_count += 5;
 
-fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
-    let mut bits = Vec::with_capacity(bytes.len() * 8);
-    for byte in bytes {
-        for i in 0..8 {
-            bits.push((byte & (1 << (7 - i))) != 0);
+        if bit_count >= 8 {
+            output.push((buffer & 0xFF) as u8);
+            buffer >>= 8;
+            bit_count -= 8;
         }
     }
-    bits
+    if bit_count > 0 {
+        output.push(buffer as u8);
+    }
+    output
 }
 
 fn write_file(bytes: &[u8], name: &str) {
@@ -133,13 +122,13 @@ fn do_decode(file_read: bool, mut bytes: Vec<u8>, key: Option<&str>) -> String {
     }
     if let Some(some_key) = key {
         if let Some(decrypted) = decrypt(bytes.as_slice(), some_key) {
-            decode(bytes_to_bits(decrypted.as_slice()))
+            decode(decrypted.as_slice())
         } else {
             eprintln!("Error: Invalid key");
             exit(1)
         }
     } else {
-        decode(bytes_to_bits(bytes.as_slice()))
+        decode(bytes.as_slice())
     }
 }
 
@@ -209,7 +198,7 @@ fn main() {
         None
     };
     //using result as enum for two "Ok()" dtypes
-    let processed_data = if options.starts_with("e") {
+    let processed_data = if options.contains("e") {
         Ok(do_encode(
             if let Ok(text) = String::from_utf8(input_bytes) {
                 text

@@ -9,7 +9,8 @@ Tool features:
     - AES128 encryption-decryption (length-preserving) available
     - opportunity to use strings of base64url symbols as an alternative to encoded binary files
 
-Usage: exe [options(as single word)] [file_path | base64url_code | input_string] [base64url_key](opt)
+Usage:
+    exe [options(as single word)] [file_path | base64url_code | input_string] [base64url_key](opt)
 
     options:
         - e - encode mode: input - existing [file_path], output - created ./encoded.bin or stderr
@@ -19,10 +20,6 @@ Usage: exe [options(as single word)] [file_path | base64url_code | input_string]
         - sw - string write: replaces output .bin or .txt file of a encoding or decoding operation with a base64url_code stdout or a stdout string correspondingly
         - sr - string read: replaces input .bin or .txt [file_path] for decoding or encoding operation with a [input_string] or a [base64url_code] correspondingly
         - g - 16bytes base64url stdout key gen
-
-Some details:
-    - use "_" instead of spaces when encode with "sr" option to avoid cmd args separation
-    - compiled exe will be named "codec5" as specified in Cargo.toml
 
 Examples:
     - codec5 esrsw Hello_world!:
@@ -34,3 +31,8 @@ Examples:
         h1F5zZxKHMw
     - codec5 ddsrsw h1F5zZxKHMw LfXs0SyPEYT7qhtqoAcGkw:
         hello world#
+
+Some details:
+    - use "_" instead of spaces when encode with "sr" option to avoid cmd args separation
+    - compiled exe will be named "codec5" as specified in Cargo.toml
+
